@@ -99,6 +99,85 @@
     .stats { gap: 12px; font-size: 14px; }
     .controls button { padding: 8px 18px; font-size: 13px; }
   }
+  .start-overlay {
+    display: flex;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.75);
+    border-radius: 16px;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    color: white;
+    backdrop-filter: blur(6px);
+    z-index: 10;
+  }
+  .start-overlay.hidden { display: none; }
+  .start-overlay h2 {
+    font-size: 42px;
+    margin-bottom: 6px;
+    letter-spacing: 4px;
+  }
+  .start-overlay .subtitle {
+    font-size: 14px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 28px;
+    letter-spacing: 2px;
+  }
+  .start-overlay .diff-label {
+    font-size: 14px;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+  }
+  .diff-options {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .diff-btn {
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.7);
+    padding: 10px 22px;
+    border-radius: 12px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.25s;
+    font-family: inherit;
+    min-width: 80px;
+  }
+  .diff-btn:hover {
+    background: rgba(255,255,255,0.14);
+    color: white;
+  }
+  .diff-btn.active {
+    background: rgba(100,255,150,0.2);
+    border-color: rgba(100,255,150,0.5);
+    color: #7dffa0;
+    box-shadow: 0 0 20px rgba(100,255,150,0.1);
+  }
+  .start-btn {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    border: none;
+    color: white;
+    padding: 14px 48px;
+    border-radius: 14px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s;
+    font-family: inherit;
+    letter-spacing: 2px;
+    box-shadow: 0 4px 20px rgba(46,204,113,0.3);
+  }
+  .start-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 30px rgba(46,204,113,0.45);
+  }
+  .start-btn:active {
+    transform: translateY(-1px);
+  }
   .game-over-overlay {
     display: none;
     position: absolute;
@@ -114,6 +193,22 @@
   .game-over-overlay.show { display: flex; }
   .game-over-overlay h2 { font-size: 36px; margin-bottom: 8px; }
   .game-over-overlay p { font-size: 18px; color: #ffd700; }
+  .game-over-overlay .back-menu-btn {
+    margin-top: 16px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.8);
+    padding: 10px 28px;
+    border-radius: 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .game-over-overlay .back-menu-btn:hover {
+    background: rgba(255,255,255,0.18);
+    color: white;
+  }
   .canvas-wrapper {
     position: relative;
     display: inline-block;
@@ -126,6 +221,7 @@
   <div class="header">
     <h1>🐍 贪吃蛇</h1>
     <div class="stats">
+      <span id="diffDisplay">🔥 普通</span>
       <span>🏆 最高 <span id="highScore">0</span></span>
       <span>⭐ 得分 <span id="score">0</span></span>
     </div>
@@ -133,9 +229,21 @@
 
   <div class="canvas-wrapper">
     <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <div class="start-overlay" id="startOverlay">
+      <h2>🐍 贪吃蛇</h2>
+      <p class="subtitle">经典街机游戏</p>
+      <p class="diff-label">🎯 选择难度</p>
+      <div class="diff-options">
+        <button class="diff-btn" data-diff="easy">🌱 简单</button>
+        <button class="diff-btn active" data-diff="medium">🔥 普通</button>
+        <button class="diff-btn" data-diff="hard">💀 困难</button>
+      </div>
+      <button class="start-btn" id="startBtn">开始游戏</button>
+    </div>
     <div class="game-over-overlay" id="gameOverOverlay">
       <h2>💀 游戏结束</h2>
       <p>得分: <span id="finalScore">0</span></p>
+      <button class="back-menu-btn" onclick="backToMenu()">🏠 返回主菜单</button>
     </div>
   </div>
 
@@ -160,7 +268,13 @@
 // ======================== 配置 ========================
 const GRID_SIZE = 20;          // 20×20 网格
 const CELL_SIZE = 20;          // 像素
-const TICK_INTERVAL_MS = 150;  // 毫秒
+
+// 难度 → tick 间隔映射
+const DIFFICULTY_CONFIG = {
+  easy:   { label: '🌱 简单', interval: 200 },
+  medium: { label: '🔥 普通', interval: 150 },
+  hard:   { label: '💀 困难', interval: 80  },
+};
 
 // ======================== DOM 引用 ========================
 const canvas = document.getElementById('gameCanvas');
@@ -169,6 +283,10 @@ const scoreEl = document.getElementById('score');
 const highScoreEl = document.getElementById('highScore');
 const finalScoreEl = document.getElementById('finalScore');
 const overlay = document.getElementById('gameOverOverlay');
+const startOverlay = document.getElementById('startOverlay');
+const diffDisplay = document.getElementById('diffDisplay');
+const diffBtns = document.querySelectorAll('.diff-btn');
+const startBtn = document.getElementById('startBtn');
 
 // ======================== 状态 ========================
 let snake = [];               // [{x, y}, ...] 蛇头在前
@@ -181,6 +299,8 @@ let gameRunning = false;
 let paused = false;
 let gameLoop = null;
 let isGameOver = false;
+let currentDifficulty = 'medium';
+let tickInterval = DIFFICULTY_CONFIG.medium.interval;
 
 highScoreEl.textContent = highScore;
 
@@ -387,12 +507,60 @@ function endGame(win = false) {
   overlay.classList.add('show');
 }
 
+// ======================== 开始页面 & 难度 ========================
+function showStartScreen() {
+  if (gameLoop) {
+    clearInterval(gameLoop);
+    gameLoop = null;
+  }
+  gameRunning = false;
+  isGameOver = false;
+  paused = false;
+  overlay.classList.remove('show');
+  startOverlay.classList.remove('hidden');
+  // 重置 canvas 为黑色
+  ctx.clearRect(0, 0, 400, 400);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, 400, 400);
+}
+
+// 切换难度高亮
+diffBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    diffBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentDifficulty = btn.dataset.diff;
+  });
+});
+
+// 开始按钮
+startBtn.addEventListener('click', () => {
+  startGame(currentDifficulty);
+});
+
+function startGame(difficulty) {
+  const config = DIFFICULTY_CONFIG[difficulty];
+  tickInterval = config.interval;
+  diffDisplay.textContent = config.label;
+  startOverlay.classList.add('hidden');
+  overlay.classList.remove('show');
+  if (gameLoop) clearInterval(gameLoop);
+  initGame();
+  gameRunning = true;
+  draw();
+  gameLoop = setInterval(tick, tickInterval);
+}
+
 function restartGame() {
   if (gameLoop) clearInterval(gameLoop);
   initGame();
   gameRunning = true;
   draw();
-  gameLoop = setInterval(tick, TICK_INTERVAL_MS);
+  gameLoop = setInterval(tick, tickInterval);
+}
+
+function backToMenu() {
+  showStartScreen();
 }
 
 function togglePause() {
@@ -435,11 +603,11 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
   });
 });
 
-// ======================== 启动 ========================
+// ======================== 启动（显示开始页面） ========================
 initGame();
-gameRunning = true;
-draw();
-gameLoop = setInterval(tick, TICK_INTERVAL_MS);
+ctx.fillStyle = '#1a1a2e';
+ctx.fillRect(0, 0, 400, 400);
+showStartScreen();
 </script>
 </body>
 </html>
