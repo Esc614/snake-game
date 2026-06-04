@@ -217,6 +217,60 @@
   .start-btn:active {
     transform: translateY(-1px);
   }
+  /* ====== 无边框模式拨动开关 ====== */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .toggle-label {
+    font-size: 14px;
+    color: rgba(255,255,255,0.7);
+    letter-spacing: 1px;
+  }
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    cursor: pointer;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.12);
+    border-radius: 24px;
+    transition: all 0.3s;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background: rgba(255,255,255,0.6);
+    border-radius: 50%;
+    transition: all 0.3s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: rgba(46,204,113,0.35);
+    border-color: rgba(46,204,113,0.5);
+    box-shadow: 0 0 12px rgba(46,204,113,0.2);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+    background: #2ecc71;
+  }
+
   .game-over-overlay {
     display: none;
     position: absolute;
@@ -260,6 +314,7 @@
   <div class="header">
     <h1>🐍 贪吃蛇</h1>
     <div class="stats">
+      <span id="wrapDisplay">🔲 有边框</span>
       <span id="diffDisplay">🔥 普通</span>
       <span>🏆 最高 <span id="highScore">0</span></span>
       <span>⭐ 得分 <span id="score">0</span></span>
@@ -277,6 +332,13 @@
         <button class="diff-btn active" data-diff="medium">🔥 普通</button>
         <button class="diff-btn" data-diff="hard">💀 困难</button>
       </div>
+      <div class="toggle-row">
+        <span class="toggle-label">🔲 无边框模式</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="wrapModeToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
       <button class="start-btn" id="startBtn">开始游戏</button>
     </div>
     <div class="game-over-overlay" id="gameOverOverlay">
@@ -289,6 +351,7 @@
   <div class="controls">
     <button onclick="restartGame()" class="restart">🔄 重新开始</button>
     <button onclick="togglePause()">⏸️ 暂停/继续</button>
+    <button onclick="toggleWrapMode()" id="wrapBtn">🔲 无边框: 关</button>
   </div>
 
   <div class="mobile-dpad">
@@ -340,6 +403,7 @@ let gameLoop = null;
 let isGameOver = false;
 let currentDifficulty = 'medium';
 let tickInterval = DIFFICULTY_CONFIG.medium.interval;
+let wrapMode = false;
 
 // ====== 平滑移动 & 粒子系统 ======
 let prevSnake = [];
@@ -382,6 +446,8 @@ function initGame() {
   score = 0;
   isGameOver = false;
   paused = false;
+  wrapMode = document.getElementById('wrapModeToggle').checked;
+  updateWrapUI();
   scoreEl.textContent = '0';
   overlay.classList.remove('show');
   food = randomFood();
@@ -622,10 +688,17 @@ function tick() {
     case 'right': newHead.x++; break;
   }
 
-  // 检查撞墙
-  if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
-    endGame();
-    return;
+  // 检查撞墙（无边框模式：穿墙）
+  if (wrapMode) {
+    if (newHead.x < 0) newHead.x = GRID_SIZE - 1;
+    else if (newHead.x >= GRID_SIZE) newHead.x = 0;
+    if (newHead.y < 0) newHead.y = GRID_SIZE - 1;
+    else if (newHead.y >= GRID_SIZE) newHead.y = 0;
+  } else {
+    if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
+      endGame();
+      return;
+    }
   }
 
   // 检查撞自身（注意：蛇尾会移动，所以排除最后一个格子）
@@ -737,6 +810,19 @@ function restartGame() {
 
 function backToMenu() {
   showStartScreen();
+}
+
+function toggleWrapMode() {
+  wrapMode = !wrapMode;
+  document.getElementById('wrapModeToggle').checked = wrapMode;
+  updateWrapUI();
+}
+
+function updateWrapUI() {
+  const wrapBtn = document.getElementById('wrapBtn');
+  if (wrapBtn) wrapBtn.textContent = wrapMode ? '🔲 无边框: 开' : '🔲 无边框: 关';
+  const wrapDisplay = document.getElementById('wrapDisplay');
+  if (wrapDisplay) wrapDisplay.textContent = wrapMode ? '🔲 无边框' : '🔲 有边框';
 }
 
 function togglePause() {
