@@ -99,6 +99,30 @@
     .stats { gap: 12px; font-size: 14px; }
     .controls button { padding: 8px 18px; font-size: 13px; }
   }
+
+  /* ====== 动画关键帧 ====== */
+  @keyframes glowPulse {
+    0%, 100% { text-shadow: 0 0 20px rgba(100,255,150,0.3), 0 0 60px rgba(100,255,150,0.1); }
+    50%      { text-shadow: 0 0 30px rgba(100,255,150,0.6), 0 0 80px rgba(100,255,150,0.2); }
+  }
+  @keyframes subtitleFade {
+    0%, 100% { opacity: 0.5; }
+    50%      { opacity: 1; }
+  }
+  @keyframes borderGlow {
+    0%, 100% { box-shadow: 0 0 5px rgba(100,255,150,0.1); }
+    50%      { box-shadow: 0 0 20px rgba(100,255,150,0.3); }
+  }
+  @keyframes particleFloat {
+    0%   { transform: translateY(0) translateX(0); opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { transform: translateY(-100px) translateX(30px); opacity: 0; }
+  }
+  @keyframes shine {
+    0%   { background-position: -200% center; }
+    100% { background-position: 200% center; }
+  }
   .start-overlay {
     display: flex;
     position: absolute;
@@ -117,12 +141,14 @@
     font-size: 42px;
     margin-bottom: 6px;
     letter-spacing: 4px;
+    animation: glowPulse 3s ease-in-out infinite;
   }
   .start-overlay .subtitle {
     font-size: 14px;
     color: rgba(255,255,255,0.5);
     margin-bottom: 28px;
     letter-spacing: 2px;
+    animation: subtitleFade 4s ease-in-out infinite;
   }
   .start-overlay .diff-label {
     font-size: 14px;
@@ -156,6 +182,7 @@
     border-color: rgba(100,255,150,0.5);
     color: #7dffa0;
     box-shadow: 0 0 20px rgba(100,255,150,0.1);
+    animation: borderGlow 2s ease-in-out infinite;
   }
   .start-btn {
     background: linear-gradient(135deg, #2ecc71, #27ae60);
@@ -170,6 +197,18 @@
     font-family: inherit;
     letter-spacing: 2px;
     box-shadow: 0 4px 20px rgba(46,204,113,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .start-btn::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    background-size: 200% 100%;
+    animation: shine 3s infinite;
+    pointer-events: none;
+    border-radius: 14px;
   }
   .start-btn:hover {
     transform: translateY(-3px);
@@ -302,6 +341,13 @@ let isGameOver = false;
 let currentDifficulty = 'medium';
 let tickInterval = DIFFICULTY_CONFIG.medium.interval;
 
+// ====== 平滑移动 & 粒子系统 ======
+let prevSnake = [];
+let prevFood = null;
+let lastTickTime = 0;
+let particles = [];
+let animFrameId = null;
+
 highScoreEl.textContent = highScore;
 
 // ======================== 工具函数 ========================
@@ -330,6 +376,7 @@ function initGame() {
     { x: 4, y: midY },
     { x: 3, y: midY },
   ];
+  prevSnake = snake.map(s => ({...s}));
   direction = 'right';
   nextDirection = 'right';
   score = 0;
@@ -338,11 +385,68 @@ function initGame() {
   scoreEl.textContent = '0';
   overlay.classList.remove('show');
   food = randomFood();
+  if (food) prevFood = { ...food };
+  lastTickTime = performance.now();
 }
 
-// ======================== 绘制 ========================
-function draw() {
+// ======================== 粒子系统 ========================
+class Particle {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.x = Math.random() * 400;
+    this.y = Math.random() * 400;
+    this.size = Math.random() * 2 + 0.5;
+    this.speedY = Math.random() * 0.3 + 0.1;
+    this.speedX = (Math.random() - 0.5) * 0.2;
+    this.opacity = Math.random() * 0.5 + 0.2;
+    this.life = Math.random() * 0.5 + 0.5;
+  }
+  update() {
+    this.y -= this.speedY;
+    this.x += this.speedX;
+    this.life -= 0.002;
+    if (this.y < -10 || this.life <= 0) this.reset();
+    if (this.x < -10) this.x = 410;
+    if (this.x > 410) this.x = -10;
+  }
+  draw() {
+    ctx.fillStyle = `rgba(255,255,255,${this.opacity * Math.max(0, this.life)})`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < 60; i++) {
+    particles.push(new Particle());
+  }
+}
+
+function updateParticles() {
+  for (const p of particles) p.update();
+}
+
+function drawParticles() {
+  for (const p of particles) p.draw();
+}
+
+// ======================== 绘制（支持插值） ========================
+function draw(progress) {
   ctx.clearRect(0, 0, 400, 400);
+
+  // 菜单模式：只画粒子
+  if (!gameRunning) {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, 400, 400);
+    drawParticles();
+    // 画一条静态的蛇作为预览装饰
+    drawSnakePreview();
+    return;
+  }
 
   // ----- 网格线（极淡） -----
   ctx.strokeStyle = 'rgba(255,255,255,0.03)';
@@ -360,11 +464,13 @@ function draw() {
 
   // ----- 食物 -----
   if (food) {
-    const fx = food.x * CELL_SIZE + CELL_SIZE/2;
-    const fy = food.y * CELL_SIZE + CELL_SIZE/2;
+    // 食物也插值（用 prevFood 或当前食物位置）
+    const prev = prevFood || food;
+    const fx = (prev.x + (food.x - prev.x) * progress) * CELL_SIZE + CELL_SIZE/2;
+    const fy = (prev.y + (food.y - prev.y) * progress) * CELL_SIZE + CELL_SIZE/2;
     // 发光
     ctx.shadowColor = '#ff4757';
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = 14 + Math.sin(performance.now() / 300) * 4;
     // 苹果
     ctx.beginPath();
     ctx.arc(fx, fy, CELL_SIZE/2 - 2, 0, Math.PI * 2);
@@ -378,14 +484,19 @@ function draw() {
     ctx.fill();
   }
 
-  // ----- 蛇 -----
+  // ----- 蛇（插值位置实现平滑移动） -----
   for (let i = 0; i < snake.length; i++) {
-    const seg = snake[i];
-    const x = seg.x * CELL_SIZE;
-    const y = seg.y * CELL_SIZE;
-    const pad = i === 0 ? 0 : 1; // 蛇头占满格子
+    const prev = prevSnake[i] || snake[i];
+    const curr = snake[i];
+    // 线性插值位置
+    const ix = prev.x + (curr.x - prev.x) * progress;
+    const iy = prev.y + (curr.y - prev.y) * progress;
+    const x = ix * CELL_SIZE;
+    const y = iy * CELL_SIZE;
 
-    // 蛇头渐变
+    const pad = i === 0 ? 0 : 1;
+
+    // 蛇身颜色渐变（越靠近尾部越暗）
     const ratio = i / snake.length;
     const r = Math.round(80 + (100 - 80) * ratio);
     const g = Math.round(200 + (160 - 200) * ratio);
@@ -437,9 +548,55 @@ function draw() {
   ctx.shadowBlur = 0;
 }
 
+// 在菜单模式下画一个装饰性蛇预览
+function drawSnakePreview() {
+  const t = performance.now() / 2000;
+  const previewSnake = [
+    { x: 7, y: 10 }, { x: 8, y: 10 }, { x: 9, y: 10 },
+    { x: 10, y: 10 }, { x: 10, y: 9 }, { x: 10, y: 8 },
+    { x: 9, y: 8 }, { x: 8, y: 8 }, { x: 7, y: 8 },
+    { x: 7, y: 9 }, { x: 7, y: 10 },
+  ];
+
+  for (let i = 0; i < previewSnake.length; i++) {
+    const seg = previewSnake[i];
+    const x = seg.x * CELL_SIZE;
+    const y = seg.y * CELL_SIZE;
+    const ratio = i / previewSnake.length;
+    const r = Math.round(80 + (100 - 80) * ratio);
+    const g = Math.round(200 + (160 - 200) * ratio);
+    const b = Math.round(80 + (100 - 80) * ratio);
+
+    ctx.shadowColor = 'rgba(0,255,100,0.15)';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  // 预览的食物
+  const foodX = 13 * CELL_SIZE + CELL_SIZE/2;
+  const foodY = 10 * CELL_SIZE + CELL_SIZE/2;
+  const pulse = Math.sin(t * Math.PI * 2) * 3 + 14;
+  ctx.shadowColor = '#ff4757';
+  ctx.shadowBlur = pulse;
+  ctx.beginPath();
+  ctx.arc(foodX, foodY, CELL_SIZE/2 - 2, 0, Math.PI * 2);
+  ctx.fillStyle = '#ff4757';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
 // ======================== 游戏逻辑 ========================
 function tick() {
   if (paused || isGameOver) return;
+
+  // 保存上一帧位置（用于插值）
+  prevSnake = snake.map(s => ({...s}));
+  prevFood = food ? { ...food } : null;
+  lastTickTime = performance.now();
 
   // 应用缓冲方向
   direction = nextDirection;
@@ -482,8 +639,6 @@ function tick() {
   } else {
     snake.pop();
   }
-
-  draw();
 }
 
 function endGame(win = false) {
@@ -507,6 +662,21 @@ function endGame(win = false) {
   overlay.classList.add('show');
 }
 
+// ======================== 渲染循环 (requestAnimationFrame) ========================
+function renderLoop(time) {
+  if (gameRunning) {
+    // 计算插值进度 (0 → 1)
+    const elapsed = time - lastTickTime;
+    const progress = Math.min(elapsed / tickInterval, 1);
+    draw(progress);
+  } else {
+    // 菜单模式：只画粒子
+    updateParticles();
+    draw(0);
+  }
+  animFrameId = requestAnimationFrame(renderLoop);
+}
+
 // ======================== 开始页面 & 难度 ========================
 function showStartScreen() {
   if (gameLoop) {
@@ -518,10 +688,7 @@ function showStartScreen() {
   paused = false;
   overlay.classList.remove('show');
   startOverlay.classList.remove('hidden');
-  // 重置 canvas 为黑色
-  ctx.clearRect(0, 0, 400, 400);
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, 400, 400);
+  initParticles();
 }
 
 // 切换难度高亮
@@ -547,7 +714,6 @@ function startGame(difficulty) {
   if (gameLoop) clearInterval(gameLoop);
   initGame();
   gameRunning = true;
-  draw();
   gameLoop = setInterval(tick, tickInterval);
 }
 
@@ -555,7 +721,6 @@ function restartGame() {
   if (gameLoop) clearInterval(gameLoop);
   initGame();
   gameRunning = true;
-  draw();
   gameLoop = setInterval(tick, tickInterval);
 }
 
@@ -604,10 +769,11 @@ document.querySelectorAll('.dpad-btn').forEach(btn => {
 });
 
 // ======================== 启动（显示开始页面） ========================
+initParticles();
 initGame();
-ctx.fillStyle = '#1a1a2e';
-ctx.fillRect(0, 0, 400, 400);
 showStartScreen();
+// 启动渲染循环
+renderLoop(performance.now());
 </script>
 </body>
 </html>
