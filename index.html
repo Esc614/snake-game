@@ -405,12 +405,14 @@ let currentDifficulty = 'medium';
 let tickInterval = DIFFICULTY_CONFIG.medium.interval;
 let wrapMode = false;
 
-// ====== 平滑移动 & 粒子系统 ======
+// ====== 平滑移动 & 粒子系统 & 穿墙特效 ======
 let prevSnake = [];
 let prevFood = null;
 let lastTickTime = 0;
 let particles = [];
 let animFrameId = null;
+let wrapFlashTimer = 0;          // 穿墙闪光特效计时器
+let wrapFlashParticles = [];     // 穿墙位置产生的粒子
 
 highScoreEl.textContent = highScore;
 
@@ -448,6 +450,7 @@ function initGame() {
   paused = false;
   wrapMode = document.getElementById('wrapModeToggle').checked;
   updateWrapUI();
+  wrapFlashTimer = 0;
   scoreEl.textContent = '0';
   overlay.classList.remove('show');
   food = randomFood();
@@ -455,7 +458,7 @@ function initGame() {
   lastTickTime = performance.now();
 }
 
-// ======================== 粒子系统 ========================
+// ======================== 粒子系统 & 穿墙闪光粒子 ========================
 class Particle {
   constructor() {
     this.reset();
@@ -485,8 +488,81 @@ class Particle {
   }
 }
 
+// ====== 穿墙闪光粒子 ======
+class WrapFlashParticle {
+  constructor(x, y, edge) {
+    this.x = x;
+    this.y = y;
+    this.size = Math.random() * 3 + 1.5;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 60 + 30;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.life = 0.4;
+    this.maxLife = 0.4;
+    this.color = `hsl(${120 + Math.random() * 40}, 80%, ${50 + Math.random() * 30}%)`;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.life -= dt;
+  }
+  draw() {
+    if (this.life <= 0) return;
+    const a = this.life / this.maxLife;
+    ctx.globalAlpha = a;
+    ctx.shadowColor = 'rgba(46,204,113,0.8)';
+    ctx.shadowBlur = 10 * a;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size * a, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+}
+
+function spawnWrapFlash(prevHead, newHead) {
+  const edge = {};
+  if (prevHead.x > newHead.x + GRID_SIZE/2) {
+    // 从右边界穿出
+    const py = prevHead.y * CELL_SIZE + CELL_SIZE/2;
+    edge.x = GRID_SIZE * CELL_SIZE;
+    edge.y = py;
+  } else if (prevHead.x + GRID_SIZE/2 < newHead.x) {
+    // 从左边界穿出
+    const py = prevHead.y * CELL_SIZE + CELL_SIZE/2;
+    edge.x = 0;
+    edge.y = py;
+  }
+  if (prevHead.y > newHead.y + GRID_SIZE/2) {
+    // 从下边界穿出
+    const px = prevHead.x * CELL_SIZE + CELL_SIZE/2;
+    edge.x = px;
+    edge.y = GRID_SIZE * CELL_SIZE;
+  } else if (prevHead.y + GRID_SIZE/2 < newHead.y) {
+    // 从上边界穿出
+    const px = prevHead.x * CELL_SIZE + CELL_SIZE/2;
+    edge.x = px;
+    edge.y = 0;
+  }
+  for (let i = 0; i < 12; i++) {
+    wrapFlashParticles.push(new WrapFlashParticle(edge.x, edge.y));
+  }
+}
+
+function updateWrapFlashParticles(dt) {
+  for (let i = wrapFlashParticles.length - 1; i >= 0; i--) {
+    wrapFlashParticles[i].update(dt);
+    if (wrapFlashParticles[i].life <= 0) {
+      wrapFlashParticles.splice(i, 1);
+    }
+  }
+}
+
 function initParticles() {
   particles = [];
+  wrapFlashParticles = [];
   for (let i = 0; i < 60; i++) {
     particles.push(new Particle());
   }
@@ -550,13 +626,27 @@ function draw(progress) {
     ctx.fill();
   }
 
-  // ----- 蛇（插值位置实现平滑移动） -----
+  // ----- 蛇（插值位置实现平滑移动；穿墙时直接定格最终位置） -----
+  // 先检测本轮是否有穿墙发生
+  let hasWrap = false;
+  if (wrapMode) {
+    for (let i = 0; i < snake.length && i < prevSnake.length; i++) {
+      if (Math.abs(snake[i].x - prevSnake[i].x) > GRID_SIZE / 2 ||
+          Math.abs(snake[i].y - prevSnake[i].y) > GRID_SIZE / 2) {
+        hasWrap = true;
+        break;
+      }
+    }
+  }
+
   for (let i = 0; i < snake.length; i++) {
     const prev = prevSnake[i] || snake[i];
     const curr = snake[i];
-    // 线性插值位置
-    const ix = prev.x + (curr.x - prev.x) * progress;
-    const iy = prev.y + (curr.y - prev.y) * progress;
+
+    // 穿墙帧：定格在最终位置（不插值，避免蛇身横跨屏幕的视觉割裂）
+    // 正常帧：线性插值实现平滑移动
+    const ix = hasWrap ? curr.x : (prev.x + (curr.x - prev.x) * progress);
+    const iy = hasWrap ? curr.y : (prev.y + (curr.y - prev.y) * progress);
     const x = ix * CELL_SIZE;
     const y = iy * CELL_SIZE;
 
@@ -612,6 +702,38 @@ function draw(progress) {
   }
 
   ctx.shadowBlur = 0;
+
+  // ===== 穿墙边界闪光特效 =====
+  if (wrapFlashTimer > 0) {
+    ctx.save();
+    // 在四条边界上绘制闪烁光条
+    const flashAlpha = Math.min(wrapFlashTimer * 4, 1) * 0.5;
+    const gradientColor = `rgba(46, 204, 113, ${flashAlpha})`;
+
+    // 上边界
+    ctx.fillStyle = gradientColor;
+    ctx.fillRect(0, 0, 400, 2);
+    // 下边界
+    ctx.fillRect(0, 398, 400, 2);
+    // 左边界
+    ctx.fillRect(0, 0, 2, 400);
+    // 右边界
+    ctx.fillRect(398, 0, 2, 400);
+
+    // 闪烁光晕
+    ctx.shadowColor = 'rgba(46, 204, 113, 0.6)';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(46, 204, 113, 0.15)';
+    ctx.fillRect(0, 0, 400, 400);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    wrapFlashTimer -= 0.016; // 约一帧的衰减
+    if (wrapFlashTimer < 0) wrapFlashTimer = 0;
+  }
+
+  // 绘制穿墙闪光粒子
+  for (const p of wrapFlashParticles) p.draw();
 }
 
 // 在菜单模式下画一个装饰性蛇预览
@@ -690,10 +812,17 @@ function tick() {
 
   // 检查撞墙（无边框模式：穿墙）
   if (wrapMode) {
-    if (newHead.x < 0) newHead.x = GRID_SIZE - 1;
-    else if (newHead.x >= GRID_SIZE) newHead.x = 0;
-    if (newHead.y < 0) newHead.y = GRID_SIZE - 1;
-    else if (newHead.y >= GRID_SIZE) newHead.y = 0;
+    let wrapped = false;
+    if (newHead.x < 0) { newHead.x = GRID_SIZE - 1; wrapped = true; }
+    else if (newHead.x >= GRID_SIZE) { newHead.x = 0; wrapped = true; }
+    if (newHead.y < 0) { newHead.y = GRID_SIZE - 1; wrapped = true; }
+    else if (newHead.y >= GRID_SIZE) { newHead.y = 0; wrapped = true; }
+    if (wrapped) {
+      // 保留 prevSnake[0] 在原位置 → 穿墙帧直接定格在最终位置
+      // 同时迸发穿墙闪光粒子
+      wrapFlashTimer = 0.4;
+      spawnWrapFlash(head, newHead);
+    }
   } else {
     if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
       endGame();
@@ -747,7 +876,14 @@ function endGame(win = false) {
 }
 
 // ======================== 渲染循环 (requestAnimationFrame) ========================
+let lastFrameTime = 0;
+
 function renderLoop(time) {
+  // 计算帧间隔
+  if (!lastFrameTime) lastFrameTime = time;
+  const dt = Math.min((time - lastFrameTime) / 1000, 0.05); // 限制最大 dt 防止卡顿时跳帧
+  lastFrameTime = time;
+
   if (gameRunning) {
     // 计算插值进度 (0 → 1)
     const elapsed = time - lastTickTime;
@@ -758,6 +894,10 @@ function renderLoop(time) {
     updateParticles();
     draw(0);
   }
+
+  // 更新穿墙闪光粒子
+  updateWrapFlashParticles(dt);
+
   animFrameId = requestAnimationFrame(renderLoop);
 }
 
