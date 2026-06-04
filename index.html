@@ -570,8 +570,19 @@ function drawSnakePreview() {
     ctx.shadowColor = 'rgba(0,255,100,0.15)';
     ctx.shadowBlur = 6;
     ctx.fillStyle = `rgb(${r},${g},${b})`;
+    // 兼容的圆角矩形
+    const rx = x + 1, ry = y + 1, rw = CELL_SIZE - 2, rh = CELL_SIZE - 2, rr = 4;
     ctx.beginPath();
-    ctx.roundRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2, 4);
+    ctx.moveTo(rx + rr, ry);
+    ctx.lineTo(rx + rw - rr, ry);
+    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rr);
+    ctx.lineTo(rx + rw, ry + rh - rr);
+    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rr, ry + rh);
+    ctx.lineTo(rx + rr, ry + rh);
+    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rr);
+    ctx.lineTo(rx, ry + rr);
+    ctx.quadraticCurveTo(rx, ry, rx + rr, ry);
+    ctx.closePath();
     ctx.fill();
   }
   ctx.shadowBlur = 0;
